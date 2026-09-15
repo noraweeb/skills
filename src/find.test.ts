@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseFindOptions, runFind, searchSkillsAPI } from './find.ts';
 
+vi.mock('./detect-agent.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./detect-agent.ts')>();
+  return { ...actual, getAgentName: vi.fn(actual.getAgentName) };
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -73,5 +78,55 @@ describe('searchSkillsAPI', () => {
     const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
     expect(output).toContain('owner/repo@skill-1');
     expect(output).toContain('owner/repo@skill-11');
+  });
+
+  it('includes a <copilot-ref> tag per result when running inside GitHub Copilot', async () => {
+    const { getAgentName } = await import('./detect-agent.ts');
+    vi.mocked(getAgentName).mockResolvedValue('github-copilot');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          skills: [
+            { id: 'owner/repo/skill-1', name: 'skill-1', installs: 5, source: 'owner/repo' },
+          ],
+        }),
+      })
+    );
+    vi.stubEnv('DISABLE_TELEMETRY', '1');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runFind(['owner/repo']);
+
+    const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+    expect(output).toContain(
+      '<copilot-ref kind="repo" target-id="https://github.com/owner/repo" label="owner/repo" />'
+    );
+  });
+
+  it('omits the <copilot-ref> tag when not running inside GitHub Copilot', async () => {
+    const { getAgentName } = await import('./detect-agent.ts');
+    vi.mocked(getAgentName).mockResolvedValue(null);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          skills: [
+            { id: 'owner/repo/skill-1', name: 'skill-1', installs: 5, source: 'owner/repo' },
+          ],
+        }),
+      })
+    );
+    vi.stubEnv('DISABLE_TELEMETRY', '1');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runFind(['owner/repo']);
+
+    const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+    expect(output).not.toContain('<copilot-ref');
   });
 });

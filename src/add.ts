@@ -8,6 +8,7 @@ import { stripTerminalEscapes } from './sanitize.ts';
 import { searchMultiselect } from './prompts/search-multiselect.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { discoverSkills, getSkillDisplayName, filterSkills } from './skills.ts';
+import { materializeExternalReferences } from './reference-resolver.ts';
 import {
   installSkillForAgent,
   installBlobSkillForAgent,
@@ -1897,6 +1898,23 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       if (p.isCancel(confirmed) || !confirmed) {
         await cleanup(tempDir);
         exitInstallationCancelled();
+      }
+    }
+
+    // Some skills link out to shared files that live outside their own
+    // directory (e.g. a repo-root `references/` folder linked as
+    // `../../references/x.md`). Pull those into the skill directory itself
+    // and rewrite the links so they still resolve once installed.
+    if (!blobResult) {
+      const repoRoot = tempDir || parsed.localPath || null;
+      if (repoRoot) {
+        for (const skill of selectedSkills) {
+          try {
+            await materializeExternalReferences(skill.path, repoRoot);
+          } catch {
+            // Best-effort — never block installation over reference resolution.
+          }
+        }
       }
     }
 

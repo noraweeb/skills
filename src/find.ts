@@ -3,7 +3,7 @@ import { runAdd, parseAddOptions } from './add.ts';
 import { sanitizeMetadata } from './sanitize.ts';
 import { track } from './telemetry.ts';
 import { isRepoPrivate } from './source-parser.ts';
-import { isRunningInAgent } from './detect-agent.ts';
+import { getAgentName, isRunningInAgent } from './detect-agent.ts';
 
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -316,6 +316,15 @@ function getOwnerRepoFromString(pkg: string): { owner: string; repo: string } | 
   return null;
 }
 
+// Renders a GitHub Copilot inline repo reference so the source repo shows up
+// as a clickable citation in the Copilot chat/CLI UI.
+function formatCopilotRepoRef(pkg: string): string | null {
+  const info = getOwnerRepoFromString(pkg);
+  if (!info) return null;
+  const label = `${info.owner}/${info.repo}`;
+  return `<copilot-ref kind="repo" target-id="https://github.com/${label}" label="${label}" />`;
+}
+
 async function isRepoPublic(owner: string, repo: string): Promise<boolean> {
   const isPrivate = await isRepoPrivate(owner, repo);
   // Return true only if we know it's public (isPrivate === false)
@@ -357,6 +366,10 @@ ${DIM}  2) npx skills add <owner/repo@skill>${RESET}`;
     console.log(`${DIM}Install with${RESET} npx skills add <owner/repo@skill>`);
     console.log();
 
+    // Only GitHub Copilot understands the <copilot-ref> tag, so restrict it
+    // to that agent to avoid printing unrecognized markup elsewhere.
+    const includeCopilotRef = (await getAgentName()) === 'github-copilot';
+
     for (const skill of results) {
       const pkg = skill.source || skill.slug;
       const installs = formatInstalls(skill.installs);
@@ -364,6 +377,10 @@ ${DIM}  2) npx skills add <owner/repo@skill>${RESET}`;
         `${TEXT}${pkg}@${skill.name}${RESET}${installs ? ` ${CYAN}${installs}${RESET}` : ''}`
       );
       console.log(`${DIM}└ https://skills.sh/${skill.slug}${RESET}`);
+      if (includeCopilotRef) {
+        const ref = formatCopilotRepoRef(pkg);
+        if (ref) console.log(ref);
+      }
       console.log();
     }
     return;
