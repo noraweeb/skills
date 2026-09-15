@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'child_process';
-import { existsSync, rmSync, mkdirSync, writeFileSync, lstatSync } from 'fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, lstatSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { runCli, stripAnsi } from './test-utils.ts';
@@ -153,6 +153,46 @@ description: A Kiro test skill
     );
     expect(existsSync(join(projectDir, '.agents', 'skills', 'kiro-skill'))).toBe(true);
     expect(result.stdout).toContain('symlinked: Kiro CLI');
+  });
+
+  it('pulls in files referenced via relative paths outside the skill directory', () => {
+    const sourceDir = join(testDir, 'source');
+    const skillDir = join(sourceDir, 'skills', 'my-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      `---
+name: my-skill
+description: A skill that links to a shared reference
+---
+
+# My Skill
+
+See the checklist in \`../../references/checklist.md\` before finishing.
+`
+    );
+    mkdirSync(join(sourceDir, 'references'), { recursive: true });
+    writeFileSync(join(sourceDir, 'references', 'checklist.md'), '# Checklist\n\n- Step one\n');
+
+    const projectDir = join(testDir, 'project');
+    mkdirSync(join(projectDir, '.claude'), { recursive: true });
+
+    const result = runCli(['add', sourceDir, '-y', '--agent', 'claude-code'], projectDir);
+
+    expect(result.exitCode).toBe(0);
+
+    const installedSkillMd = readFileSync(
+      join(projectDir, '.agents', 'skills', 'my-skill', 'SKILL.md'),
+      'utf-8'
+    );
+    expect(installedSkillMd).toContain('references/checklist.md');
+    expect(installedSkillMd).not.toContain('../../references/checklist.md');
+
+    const installedReference = readFileSync(
+      join(projectDir, '.agents', 'skills', 'my-skill', 'references', 'checklist.md'),
+      'utf-8'
+    );
+    expect(installedReference).toContain('Step one');
   });
 
   it('reports a skipped project symlink for an automatically selected agent', () => {
